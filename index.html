@@ -6,16 +6,16 @@
 <title>札幌市 沿線別 坪単価マップ</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Helvetica Neue',Arial,'Hiragino Kaku Gothic Pro','Meiryo',sans-serif;background:#0d0f1a;color:#e0e0ec;min-height:100vh;overflow:hidden}
+body{font-family:'Helvetica Neue',Arial,'Hiragino Kaku Gothic Pro','Meiryo',sans-serif;background:#0d0f1a;color:#e0e0ec;height:100vh;height:100dvh;overflow:hidden;display:flex;flex-direction:column}
 
-header{height:52px;padding:0 20px;display:flex;align-items:center;gap:14px;border-bottom:1px solid #1e2035;background:#10121e}
+header{flex-shrink:0;height:52px;padding:0 20px;display:flex;align-items:center;gap:14px;border-bottom:1px solid #1e2035;background:#10121e}
 h1{font-size:1.15rem;font-weight:700;letter-spacing:.03em;white-space:nowrap}
 .subtitle{font-size:.72rem;color:#5a5a7a;margin-top:2px}
 
-.main{display:flex;height:calc(100vh - 52px)}
+.main{display:flex;flex:1;min-height:0}
 
 /* ── 左ペイン ─────── */
-.left{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.left{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
 
 .vtabs{display:flex;background:#10121e;border-bottom:1px solid #1e2035}
 .vtab{padding:9px 22px;font-size:.8rem;cursor:pointer;color:#666;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;user-select:none}
@@ -23,7 +23,7 @@ h1{font-size:1.15rem;font-weight:700;letter-spacing:.03em;white-space:nowrap}
 
 /* Map */
 .canvas-wrap{flex:1;position:relative;background:#11132060 linear-gradient(135deg,#0d0f1a 0%,#111328 100%);display:flex;align-items:center;justify-content:center;overflow:hidden}
-canvas{display:block;cursor:grab;max-width:100%;max-height:100%}
+canvas{display:block;cursor:grab;max-width:100%;max-height:100%;touch-action:none}
 canvas:active{cursor:grabbing}
 
 .map-ctrl{position:absolute;bottom:14px;right:14px;display:flex;flex-direction:column;gap:5px}
@@ -70,9 +70,40 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
 .note{font-size:.65rem;color:#333350;line-height:1.7;padding-top:4px;border-top:1px solid #1a1c30}
 
 /* Responsive */
-@media(max-width:900px){
+@media(max-width:900px) and (min-width:701px){
   .sidebar{width:220px;padding:14px;gap:16px}
   .detail-price{font-size:1.5rem}
+}
+
+/* ── スマートフォン（縦積み） ── */
+@media(max-width:700px){
+  header{height:auto;padding:9px 14px}
+  h1{font-size:1rem;white-space:normal;line-height:1.25}
+  .subtitle{font-size:.62rem}
+
+  /* 地図/チャートを上に大きく、操作パネルを下に */
+  .main{flex-direction:column}
+  .left{flex:1;min-height:0}
+
+  .sidebar{width:100%;border-left:none;border-top:1px solid #1e2035;
+    padding:12px 14px 14px;gap:13px;max-height:36vh}
+
+  /* 凡例・路線を横並びでコンパクトに */
+  .legend{flex-direction:row;flex-wrap:wrap;gap:7px 14px}
+  .legend-row{font-size:.72rem}
+  .budget-val{font-size:1.25rem}
+
+  /* タッチしやすい操作ボタン */
+  .map-ctrl button{width:40px;height:40px;font-size:1.15rem}
+  .map-ctrl button.small{height:32px;font-size:.62rem}
+  .vtab{padding:11px 20px;font-size:.82rem}
+
+  /* 駅タップ時の詳細は下からせり出すパネルに */
+  .detail.show{position:fixed;left:0;right:0;bottom:0;z-index:50;
+    border-radius:16px 16px 0 0;border-bottom:none;padding:18px 18px 24px;
+    box-shadow:0 -10px 34px rgba(0,0,0,.55)}
+  .detail-close{top:12px;right:16px;font-size:1.5rem;padding:4px}
+  .detail-price{font-size:2rem}
 }
 </style>
 </head>
@@ -258,7 +289,8 @@ const LINES = [
 ];
 
 // ─── Canvas 定数 ─────────────────────────────────────────────────────────────
-const CW = 760, CH = 520;
+// CW/CH は実際の表示サイズに合わせて動的に更新する（スマホ対応）
+let CW = 760, CH = 520;
 const BSX = 4200, BSY = 4800;
 const INIT = { cx: 141.360, cy: 43.049, zoom: 1.0 };
 
@@ -270,6 +302,25 @@ let selSt = null;  // { stName, lineId }
 
 const canvas = document.getElementById('map');
 const ctx = canvas.getContext('2d');
+
+// Canvasを表示領域いっぱいにフィットさせ、高解像度（Retina）対応で描画する
+function resizeCanvas() {
+  const wrap = document.getElementById('canvasWrap');
+  const cssW = wrap.clientWidth, cssH = wrap.clientHeight;
+  if (!cssW || !cssH) return;
+  const dpr = window.devicePixelRatio || 1;
+  CW = cssW; CH = cssH;                       // 論理サイズ（CSSピクセル）
+  canvas.width = Math.round(cssW * dpr);      // 実ピクセル（くっきり描画用）
+  canvas.height = Math.round(cssH * dpr);
+  canvas.style.width = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);     // 以降はCSSピクセル単位で描ける
+}
+
+// 初期表示：画面幅に応じてズームを調整し、PC版と同じ範囲が見えるようにする
+function setInitialView() {
+  view = { cx: INIT.cx, cy: INIT.cy, zoom: INIT.zoom * (CW / 760) };
+}
 
 // 座標変換
 function g2c(lon, lat) {
@@ -585,7 +636,7 @@ document.getElementById('detailClose').addEventListener('click', hideDetail);
 
 // ─── ヒットテスト ──────────────────────────────────────────────────────────
 function hitTest(mx, my) {
-  let best = null, bestD = 14;
+  let best = null, bestD = 18;  // タップしやすいよう許容半径を広めに
   LINES.forEach(line => {
     line.st.filter(s => s.g && s.p <= budget).forEach(s => {
       const p = g2c(s.g[0], s.g[1]);
@@ -686,7 +737,7 @@ document.getElementById('zOut').addEventListener('click', () => {
   view.zoom = Math.max(0.4, view.zoom / 1.3); drawMap();
 });
 document.getElementById('zReset').addEventListener('click', () => {
-  view = { ...INIT }; drawMap();
+  setInitialView(); drawMap();
 });
 
 // ─── ビュー切替 ────────────────────────────────────────────────────────────
@@ -697,6 +748,7 @@ document.getElementById('vMap').addEventListener('click', () => {
   document.getElementById('vChart').classList.remove('active');
   document.getElementById('canvasWrap').style.display = 'flex';
   document.getElementById('chartArea').style.display = 'none';
+  resizeCanvas();
   drawMap();
 });
 document.getElementById('vChart').addEventListener('click', () => {
@@ -721,9 +773,18 @@ document.getElementById('bSlider').addEventListener('input', function () {
 });
 
 // ─── 初期化 ────────────────────────────────────────────────────────────────
+resizeCanvas();
+setInitialView();
 buildLineTabs();
 buildLineLegend();
 drawMap();
+
+// 画面回転・リサイズ時にCanvasを再フィット
+window.addEventListener('resize', () => {
+  resizeCanvas();
+  if (curViewMode === 'chart') renderChart(curLine);
+  else drawMap();
+});
 </script>
 </body>
 </html>

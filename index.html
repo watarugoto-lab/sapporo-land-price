@@ -36,8 +36,8 @@ canvas:active{cursor:grabbing}
 .line-tabs{display:flex;background:#10121e;border-bottom:1px solid #1e2035;flex-shrink:0}
 .ltab{padding:9px 18px;font-size:.78rem;cursor:pointer;color:#666;border-left:3px solid transparent;transition:background .12s,color .12s;user-select:none}
 .ltab.active{color:#e0e0ec;background:#13152280}
-.chart-inner{flex:1;position:relative;overflow:hidden}
-#chart{position:absolute;top:0;left:0;width:100%;height:100%}
+.chart-inner{flex:1;position:relative;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
+#chart{display:block}
 
 /* ── 右サイドバー ─── */
 .sidebar{width:270px;border-left:1px solid #1e2035;padding:18px;display:flex;flex-direction:column;gap:20px;overflow-y:auto;background:#0e1020;flex-shrink:0}
@@ -479,12 +479,33 @@ function drawMap() {
 // ─── チャート ───────────────────────────────────────────────────────────────
 function renderChart(line) {
   const svg = document.getElementById('chart');
-  const W = svg.getBoundingClientRect().width || 660;
-  const H = svg.getBoundingClientRect().height || 460;
-  if (W < 50 || H < 50) { setTimeout(() => renderChart(line), 50); return; }
+  const inner = svg.parentElement;            // chart-inner
+  const availW = inner.clientWidth;
+  const availH = inner.clientHeight;
+  if (availW < 50 || availH < 50) { setTimeout(() => renderChart(line), 50); return; }
 
-  const PAD = { t: 40, r: 20, b: 80, l: 65 };
+  const isMobile = window.innerWidth <= 700;
   const sts = line.st.filter(s => s.p <= budget);
+
+  // スマホでは1駅あたりの横幅を確保し、横スクロールで全駅を大きく読めるようにする
+  const minStep = isMobile ? 52 : 0;
+  const PAD = { t: isMobile ? 44 : 40, r: 20, b: isMobile ? 98 : 80, l: isMobile ? 58 : 65 };
+  const W = Math.max(availW, PAD.l + PAD.r + Math.max(1, sts.length - 1) * minStep);
+  const H = availH;
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+  svg.style.width = W + 'px';
+  svg.style.height = H + 'px';
+
+  // フォント・ドットサイズ（スマホは大きめ）
+  const FS = {
+    price: isMobile ? 15 : 10,
+    name:  isMobile ? 13 : 10,
+    tick:  isMobile ? 12 : 10,
+    title: isMobile ? 14 : 12,
+    axis:  isMobile ? 12 : 10
+  };
+  const DR = isMobile ? 6 : 5;
 
   if (sts.length < 2) {
     svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="#555577" font-size="14" font-family="sans-serif">表示できる駅がありません（予算を上げてください）</text>`;
@@ -534,8 +555,8 @@ function renderChart(line) {
     tickVals.push({ v, y: (PAD.t + (1 - v / pTop) * iH).toFixed(1) });
   }
 
-  // 価格ラベルを表示する駅（全駅 or 重要駅）
-  const labelAll = sts.length <= 12;
+  // 価格ラベルを表示する駅（駅間隔が十分なら全駅）
+  const labelAll = xStep >= 30;
 
   svg.innerHTML = `
 <defs>
@@ -548,7 +569,7 @@ function renderChart(line) {
 <!-- グリッド & Y軸 -->
 ${tickVals.map(t => `
   <line x1="${PAD.l}" y1="${t.y}" x2="${(W - PAD.r).toFixed(0)}" y2="${t.y}" stroke="#1a1c30" stroke-width="1"/>
-  <text x="${(PAD.l - 8).toFixed(0)}" y="${(+t.y + 4).toFixed(0)}" text-anchor="end" fill="#44446a" font-size="10" font-family="sans-serif">${t.v >= 1000 ? Math.round(t.v / 100) * 100 : t.v}万</text>
+  <text x="${(PAD.l - 8).toFixed(0)}" y="${(+t.y + 4).toFixed(0)}" text-anchor="end" fill="#44446a" font-size="${FS.tick}" font-family="sans-serif">${t.v >= 1000 ? Math.round(t.v / 100) * 100 : t.v}万</text>
 `).join('')}
 
 <!-- エリア -->
@@ -559,27 +580,27 @@ ${tickVals.map(t => `
 
 <!-- 駅ドット -->
 ${pts.map(pt => `
-  <circle cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="5" fill="${pc(pt.s.p)}" stroke="#0d0f1a" stroke-width="1.5"/>
+  <circle cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="${DR}" fill="${pc(pt.s.p)}" stroke="#0d0f1a" stroke-width="1.5"/>
 `).join('')}
 
 <!-- 価格ラベル -->
 ${pts.filter(pt => labelAll || pt.s.p >= 100 || pt === pts[0] || pt === pts[pts.length - 1]).map(pt => `
-  <text x="${pt.x.toFixed(1)}" y="${(pt.y - 11).toFixed(1)}" text-anchor="middle" fill="#c0c0d8" font-size="10" font-weight="600" font-family="sans-serif">${pt.s.p >= 1000 ? (pt.s.p / 100 | 0) + '百' : pt.s.p}</text>
+  <text x="${pt.x.toFixed(1)}" y="${(pt.y - DR - 6).toFixed(1)}" text-anchor="middle" fill="#d8d8ec" font-size="${FS.price}" font-weight="700" font-family="sans-serif">${pt.s.p >= 1000 ? (pt.s.p / 100 | 0) + '百' : pt.s.p}</text>
 `).join('')}
 
 <!-- 駅名ラベル（斜め） -->
 ${pts.map((pt, i) => {
   const anchor = i === 0 ? 'end' : i === pts.length - 1 ? 'start' : 'end';
   const bx = pt.x.toFixed(1);
-  const by = (PAD.t + iH + 14).toFixed(1);
-  return `<text x="${bx}" y="${by}" text-anchor="${anchor}" fill="#8888aa" font-size="10" font-family="sans-serif" transform="rotate(-42,${bx},${by})">${pt.s.n}</text>`;
+  const by = (PAD.t + iH + (isMobile ? 16 : 14)).toFixed(1);
+  return `<text x="${bx}" y="${by}" text-anchor="${anchor}" fill="#9999bb" font-size="${FS.name}" font-family="sans-serif" transform="rotate(-42,${bx},${by})">${pt.s.n}</text>`;
 }).join('')}
 
 <!-- タイトル -->
-<text x="${(W / 2).toFixed(0)}" y="22" text-anchor="middle" fill="#b0b0cc" font-size="12" font-weight="600" font-family="sans-serif">${line.full}（${line.dir}）</text>
+<text x="${(PAD.l + iW / 2).toFixed(0)}" y="22" text-anchor="middle" fill="#b0b0cc" font-size="${FS.title}" font-weight="600" font-family="sans-serif">${line.full}（${line.dir}）</text>
 
 <!-- Y軸タイトル -->
-<text x="${(PAD.l - 48).toFixed(0)}" y="${(PAD.t + iH / 2).toFixed(0)}" text-anchor="middle" fill="#44446a" font-size="10" font-family="sans-serif" transform="rotate(-90,${(PAD.l - 48).toFixed(0)},${(PAD.t + iH / 2).toFixed(0)})">万円/坪</text>
+<text x="${(PAD.l - 46).toFixed(0)}" y="${(PAD.t + iH / 2).toFixed(0)}" text-anchor="middle" fill="#44446a" font-size="${FS.axis}" font-family="sans-serif" transform="rotate(-90,${(PAD.l - 46).toFixed(0)},${(PAD.t + iH / 2).toFixed(0)})">万円/坪</text>
 `;
 }
 
